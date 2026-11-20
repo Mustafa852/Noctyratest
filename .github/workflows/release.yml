@@ -1,0 +1,88 @@
+name: Release
+
+# Yeni sürüm yayınlamak için:   git tag v0.2.0 && git push origin v0.2.0
+# (Ya da GitHub > Actions > Release > Run workflow ile sadece derleme testi yapabilirsin.)
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-game:
+    name: Oyunu derle (Windows x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: Library-
+
+      - uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: auto
+          targetPlatform: StandaloneWindows64
+          buildName: Noctyra
+          versioning: None
+
+      - name: Zip'le
+        run: |
+          rm -rf build/StandaloneWindows64/*_BurstDebugInformation_DoNotShip
+          cd build/StandaloneWindows64
+          zip -r ../../Noctyra-win64.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: game
+          path: Noctyra-win64.zip
+
+  build-setup:
+    name: Kurulum aracını derle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Derle (repo adı exe'ye gömülür)
+        run: dotnet build Launcher/NoctyraSetup.csproj -c Release -p:RepoSlug=${{ github.repository }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup
+          path: Launcher/bin/Release/net48/NoctyraSetup.exe
+
+  publish:
+    name: GitHub Release oluştur
+    needs: [build-game, build-setup]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Noctyra ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ## Kurulum
+            1. **NoctyraSetup.exe** dosyasını indir ve çalıştır.
+            2. Setup, oyunun son sürümünü GitHub'dan indirip kurar; sonraki güncellemeleri de aynı şekilde yapar.
+
+            Elle kurmak istersen `Noctyra-win64.zip` dosyasını bir klasöre çıkarıp `Noctyra.exe`'yi çalıştır.
+          files: |
+            dist/Noctyra-win64.zip
+            dist/NoctyraSetup.exe
